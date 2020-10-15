@@ -75,10 +75,21 @@ namespace Bicep.LanguageServer.Completions
             }
         }
 
-        private IEnumerable<CompletionItem> GetSymbolCompletions(SemanticModel model, BicepCompletionContext context) =>
-            context.Kind == BicepCompletionContextKind.None
-                ? GetAccessibleSymbols(model, context).Select(SymbolExtensions.ToCompletionItem)
-                : Enumerable.Empty<CompletionItem>();
+        private IEnumerable<CompletionItem> GetSymbolCompletions(SemanticModel model, BicepCompletionContext context)
+        {
+            if (context.Kind != BicepCompletionContextKind.None)
+            {
+                return Enumerable.Empty<CompletionItem>();
+            }
+
+            var declaredTypeAssignment = GetDeclaredTypeAssignment(model, context);
+
+            // when we're inside an expression that is inside a property that expects a compile-time constant value,
+            // we should not be emitting accessible symbol completions
+            return declaredTypeAssignment?.Flags == DeclaredTypeFlags.Constant
+                ? Enumerable.Empty<CompletionItem>()
+                : GetAccessibleSymbols(model, context).Select(SymbolExtensions.ToCompletionItem);
+        }
 
         private IEnumerable<CompletionItem> GetDeclarationTypeCompletions(BicepCompletionContext context)
         {
@@ -191,14 +202,18 @@ namespace Bicep.LanguageServer.Completions
             }
         }
 
+        private DeclaredTypeAssignment? GetDeclaredTypeAssignment(SemanticModel model, BicepCompletionContext context) => context.Property == null
+            ? null
+            : model.GetDeclaredTypeAssignment(context.Property);
+
         private IEnumerable<CompletionItem> GetObjectPropertyValueCompletions(SemanticModel model, BicepCompletionContext context)
         {
-            if (context.Kind.HasFlag(BicepCompletionContextKind.PropertyValue) == false || context.Property == null)
+            if (context.Kind.HasFlag(BicepCompletionContextKind.PropertyValue) == false)
             {
                 return Enumerable.Empty<CompletionItem>();
             }
 
-            var declaredTypeAssignment = model.GetDeclaredTypeAssignment(context.Property);
+            var declaredTypeAssignment = GetDeclaredTypeAssignment(model, context);
             if (declaredTypeAssignment == null)
             {
                 return Enumerable.Empty<CompletionItem>();
