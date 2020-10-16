@@ -40,6 +40,11 @@ namespace Bicep.LanguageServer.Completions
         /// <summary>
         /// The current location needs a property value.
         /// </summary>
-        PropertyValue = 1 << 5
+        PropertyValue = 1 << 5,
+
+        /// <summary>
+        /// The current location needs an array item
+        /// </summary>
+        ArrayItem = 1 << 6
     }
 }

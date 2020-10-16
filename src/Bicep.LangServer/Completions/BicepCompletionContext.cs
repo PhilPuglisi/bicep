@@ -22,12 +22,13 @@ namespace Bicep.LanguageServer.Completions
             TokenType.NullKeyword
         }.ToImmutableHashSet();
 
-        public BicepCompletionContext(BicepCompletionContextKind kind, SyntaxBase? enclosingDeclaration = null, ObjectSyntax? @object = null, ObjectPropertySyntax? property = null)
+        public BicepCompletionContext(BicepCompletionContextKind kind, SyntaxBase? enclosingDeclaration = null, ObjectSyntax? @object = null, ObjectPropertySyntax? property = null, ArraySyntax? array = null)
         {
             this.Kind = kind;
             this.EnclosingDeclaration = enclosingDeclaration;
             this.Object = @object;
             this.Property = property;
+            this.Array = array;
         }
 
         public BicepCompletionContextKind Kind { get; }
@@ -38,19 +39,22 @@ namespace Bicep.LanguageServer.Completions
 
         public ObjectPropertySyntax? Property { get; }
 
+        public ArraySyntax? Array { get; }
+
 
         public static BicepCompletionContext Create(ProgramSyntax syntax, int offset)
         {
             var matchingNodes = FindNodesMatchingOffset(syntax, offset);
 
             var declaration = FindLastNodeOfType<IDeclarationSyntax, SyntaxBase>(matchingNodes, out _);
-            
+
             var kind = ConvertFlag(IsDeclarationStartContext(matchingNodes, offset), BicepCompletionContextKind.DeclarationStart) |
                        GetDeclarationTypeFlags(matchingNodes, offset) |
                        ConvertFlag(IsPropertyNameContext(matchingNodes, out var @object), BicepCompletionContextKind.PropertyName) |
-                       ConvertFlag(IsPropertyValueContext(matchingNodes, offset, out var property), BicepCompletionContextKind.PropertyValue);
+                       ConvertFlag(IsPropertyValueContext(matchingNodes, offset, out var property), BicepCompletionContextKind.PropertyValue) |
+                       ConvertFlag(IsArrayItemContext(matchingNodes, offset, out var array), BicepCompletionContextKind.ArrayItem);
 
-            return new BicepCompletionContext(kind, declaration, @object, property);
+            return new BicepCompletionContext(kind, declaration, @object, property, array);
         }
 
         /// <summary>
@@ -232,6 +236,31 @@ namespace Bicep.LanguageServer.Completions
                     // case 4: the cursor could be in a partial identifier/keyword name,
                     //         which will present as either a keyword or identifier token
                     return matchingNodes[^1] is Token token && PartialPropertyValueTokenTypes.Contains(token.Type);
+            }
+
+            return false;
+        }
+
+        private static bool IsArrayItemContext(List<SyntaxBase> matchingNodes, int offset, out ArraySyntax? array)
+        {
+            array = FindLastNodeOfType<ArraySyntax, ArraySyntax>(matchingNodes, out var arrayIndex);
+            if (array == null)
+            {
+                // none of the nodes are arrays
+                // so we can't possibly be in an array item context
+                return false;
+            }
+
+            // how many matching nodes remain including the object node itself
+            int nodeCount = matchingNodes.Count - arrayIndex;
+
+            switch (nodeCount)
+            {
+                case 2:
+                    return matchingNodes[^1] is Token token && token.Type == TokenType.NewLine;
+
+                case 5:
+                    return matchingNodes[^1] is Token token2 && token2.Type == TokenType.Identifier;
             }
 
             return false;

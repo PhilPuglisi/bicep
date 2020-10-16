@@ -20,7 +20,8 @@ namespace Bicep.LanguageServer.Completions
                 .Concat(GetSymbolCompletions(model, context))
                 .Concat(GetDeclarationTypeCompletions(context))
                 .Concat(GetObjectPropertyNameCompletions(model, context))
-                .Concat(GetObjectPropertyValueCompletions(model, context));
+                .Concat(GetPropertyValueCompletions(model, context))
+                .Concat(GetArrayItemCompletions(model, context));
         }
 
         private IEnumerable<CompletionItem> GetDeclarationCompletions(BicepCompletionContext context)
@@ -82,13 +83,9 @@ namespace Bicep.LanguageServer.Completions
                 return Enumerable.Empty<CompletionItem>();
             }
 
-            var declaredTypeAssignment = GetDeclaredTypeAssignment(model, context);
-
             // when we're inside an expression that is inside a property that expects a compile-time constant value,
             // we should not be emitting accessible symbol completions
-            return declaredTypeAssignment?.Flags == DeclaredTypeFlags.Constant
-                ? Enumerable.Empty<CompletionItem>()
-                : GetAccessibleSymbols(model, context).Select(SymbolExtensions.ToCompletionItem);
+            return GetAccessibleSymbols(model, context).Select(SymbolExtensions.ToCompletionItem);
         }
 
         private IEnumerable<CompletionItem> GetDeclarationTypeCompletions(BicepCompletionContext context)
@@ -202,26 +199,47 @@ namespace Bicep.LanguageServer.Completions
             }
         }
 
-        private DeclaredTypeAssignment? GetDeclaredTypeAssignment(SemanticModel model, BicepCompletionContext context) => context.Property == null
+        private static DeclaredTypeAssignment? GetDeclaredTypeAssignment(SemanticModel model, SyntaxBase? syntax) => syntax == null
             ? null
-            : model.GetDeclaredTypeAssignment(context.Property);
+            : model.GetDeclaredTypeAssignment(syntax);
 
-        private IEnumerable<CompletionItem> GetObjectPropertyValueCompletions(SemanticModel model, BicepCompletionContext context)
+        private IEnumerable<CompletionItem> GetPropertyValueCompletions(SemanticModel model, BicepCompletionContext context)
         {
-            if (context.Kind.HasFlag(BicepCompletionContextKind.PropertyValue) == false)
+            if (!context.Kind.HasFlag(BicepCompletionContextKind.PropertyValue))
             {
                 return Enumerable.Empty<CompletionItem>();
             }
 
-            var declaredTypeAssignment = GetDeclaredTypeAssignment(model, context);
-            if (declaredTypeAssignment == null)
+            var declaredTypeAssignment = GetDeclaredTypeAssignment(model, context.Property);
+            if(declaredTypeAssignment == null)
             {
                 return Enumerable.Empty<CompletionItem>();
             }
 
-            var completions = GetPropertyValueCompletions(declaredTypeAssignment.Reference.Type);
+            return GetValueCompletions(model, context, declaredTypeAssignment.Reference.Type, declaredTypeAssignment.Flags);
+        }
 
-            if (declaredTypeAssignment.Flags != DeclaredTypeFlags.Constant)
+        private IEnumerable<CompletionItem> GetArrayItemCompletions(SemanticModel model, BicepCompletionContext context)
+        {
+            if (!context.Kind.HasFlag(BicepCompletionContextKind.ArrayItem))
+            {
+                return Enumerable.Empty<CompletionItem>();
+            }
+
+            var declaredTypeAssignment = GetDeclaredTypeAssignment(model, context.Array);
+            if (declaredTypeAssignment == null || !(declaredTypeAssignment.Reference.Type is ArrayType arrayType))
+            {
+                return Enumerable.Empty<CompletionItem>();
+            }
+
+            return GetValueCompletions(model, context, arrayType.Item.Type, declaredTypeAssignment.Flags);
+        }
+
+        private static IEnumerable<CompletionItem> GetValueCompletions(SemanticModel model, BicepCompletionContext context, TypeSymbol type, DeclaredTypeFlags flags)
+        {
+            var completions = GetValueCompletionsForType(type);
+
+            if (flags != DeclaredTypeFlags.Constant)
             {
                 completions = completions.Concat(GetAccessibleSymbols(model, context).Select(SymbolExtensions.ToCompletionItem));
             }
@@ -229,7 +247,7 @@ namespace Bicep.LanguageServer.Completions
             return completions;
         }
 
-        private static IEnumerable<CompletionItem> GetPropertyValueCompletions(TypeSymbol? propertyType)
+        private static IEnumerable<CompletionItem> GetValueCompletionsForType(TypeSymbol? propertyType)
         {
             switch (propertyType)
             {
@@ -255,7 +273,7 @@ namespace Bicep.LanguageServer.Completions
                     break;
 
                 case UnionType union:
-                    var aggregatedCompletions = union.Members.SelectMany(typeRef => GetPropertyValueCompletions(typeRef.Type));
+                    var aggregatedCompletions = union.Members.SelectMany(typeRef => GetValueCompletionsForType(typeRef.Type));
                     foreach (var completion in aggregatedCompletions)
                     {
                         yield return completion;
